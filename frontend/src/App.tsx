@@ -2,15 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 
 // Types
-interface Question {
-  question_id: string;
-  question_text: string;
-  question_topic: string;
-  question_difficulty: number;
-  question_number: number;
-  remaining_time_minutes: number;
-  remaining_time_seconds: number;
-  interview_duration: number;
+interface ConversationExchange {
+  user_input: string;
+  ai_response: string;
+  intent: string;
+  timestamp: string;
+  follow_up_count?: number;
 }
 
 interface EvaluationResult {
@@ -35,29 +32,40 @@ interface SessionSummary {
   topics_covered: Record<string, any>;
 }
 
-// Connection status enum
-enum ConnectionStatus {
-  CONNECTING = 'connecting',
-  CONNECTED = 'connected',
-  DISCONNECTED = 'disconnected',
-  ERROR = 'error'
+interface InterviewResults {
+  summary: SessionSummary;
+  conversation_history: ConversationExchange[];
+  evaluations: EvaluationResult[];
+  total_questions: number;
 }
 
-// App sections enum
-enum AppSection {
-  SETUP = 'setup',
-  INTERVIEW = 'interview',
-  RESULTS = 'results'
-}
+// Connection status constants
+const ConnectionStatus = {
+  CONNECTING: 'connecting',
+  CONNECTED: 'connected',
+  DISCONNECTED: 'disconnected',
+  ERROR: 'error'
+} as const;
+
+type ConnectionStatusType = typeof ConnectionStatus[keyof typeof ConnectionStatus];
+
+// App sections constants
+const AppSection = {
+  SETUP: 'setup',
+  INTERVIEW: 'interview',
+  RESULTS: 'results'
+} as const;
+
+type AppSectionType = typeof AppSection[keyof typeof AppSection];
 
 function App() {
   // WebSocket and connection state
   const [ws, setWs] = useState<WebSocket | null>(null);
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(ConnectionStatus.CONNECTING);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatusType>(ConnectionStatus.CONNECTING);
   const [sessionId, setSessionId] = useState<string | null>(null);
 
   // UI state
-  const [currentSection, setCurrentSection] = useState<AppSection>(AppSection.SETUP);
+  const [currentSection, setCurrentSection] = useState<AppSectionType>(AppSection.SETUP);
   const [loading, setLoading] = useState(false);
   const [loadingText, setLoadingText] = useState('Processing...');
   const [error, setError] = useState<string | null>(null);
@@ -68,10 +76,12 @@ function App() {
   const [difficulty, setDifficulty] = useState(3);
   const [interviewDuration, setInterviewDuration] = useState(30);
 
-  // Interview state
-  const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
+  // Interview state - conversational
+  const [conversationHistory, setConversationHistory] = useState<ConversationExchange[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState<string>('');
+  const [remainingTime, setRemainingTime] = useState({ minutes: 0, seconds: 0 });
+  const [currentAiResponse, setCurrentAiResponse] = useState<string>('');
 
   // Results state
   const [sessionSummary, setSessionSummary] = useState<SessionSummary | null>(null);
@@ -80,6 +90,9 @@ function App() {
   // Audio recording
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  
+  // Timer for interview countdown
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   // WebSocket connection
   useEffect(() => {
@@ -88,6 +101,7 @@ function App() {
       if (ws) {
         ws.close();
       }
+      stopTimer();
     };
   }, []);
 
@@ -126,7 +140,7 @@ function App() {
     }
   };
 
-  const handleWebSocketMessage = (data: any, websocket?: WebSocket) => {
+  const handleWebSocketMessage = (data: { type: string; [key: string]: any }, websocket?: WebSocket) => {
     console.log('Received message:', data);
 
     switch (data.type) {
@@ -138,25 +152,36 @@ function App() {
         console.log('Session started with ID:', data.session_id);
         setSessionId(data.session_id);
         setCurrentSection(AppSection.INTERVIEW);
+        setRemainingTime({ minutes: data.interview_duration || interviewDuration, seconds: 0 });
         setLoading(false);
-        // Get the first question after session starts
-        setTimeout(() => {
-          console.log('About to get next question, ws=', !!ws, 'sessionId=', data.session_id);
-          getNextQuestionWithId(data.session_id, websocket);
-        }, 100);
+        startTimer();
         break;
 
-      case 'question':
-        console.log('Received question:', data);
-        setCurrentQuestion(data);
-        setTranscript('');
+      case 'ai_conversation': {
+        console.log('Received AI conversation response:', data);
+        setCurrentAiResponse(data.response_text);
+        setTranscript(data.transcript);
         setLoading(false);
+        
+        // Add to conversation history
+        const newExchange = {
+          user_input: data.transcript,
+          ai_response: data.response_text,
+          intent: data.response_type || 'conversation',
+          timestamp: new Date().toISOString()
+        };
+        setConversationHistory(prev => [...prev, newExchange]);
+        
+        // Auto-play AI response if available
+        if (data.auto_play && data.response_audio) {
+          playAudioFromBase64(data.response_audio);
+        }
         break;
+      }
 
       case 'answer_recorded':
         setTranscript(data.transcript);
         setLoading(false);
-        // Don't show evaluation during interview
         break;
 
       case 'interview_complete':
@@ -166,6 +191,7 @@ function App() {
       case 'session_ended':
         setSessionSummary(data.summary);
         setAllEvaluations(data.evaluations || []);
+        setConversationHistory(data.conversation_history || []);
         setCurrentSection(AppSection.RESULTS);
         setLoading(false);
         break;
@@ -211,52 +237,15 @@ function App() {
     ws.send(JSON.stringify(message));
   };
 
-  const getNextQuestion = () => {
-    if (!ws || !sessionId) {
-      console.log('Cannot get question: ws=', !!ws, 'sessionId=', sessionId);
-      return;
-    }
-
-    console.log('Getting next question for session:', sessionId);
-    setLoading(true);
-    setLoadingText('Loading next question...');
-
-    ws.send(JSON.stringify({
-      type: 'get_question',
-      session_id: sessionId
-    }));
-
-    // Don't set loading to false here - wait for response
-  };
-
-  const getNextQuestionWithId = (sessionIdParam: string, websocket?: WebSocket) => {
-    const wsToUse = websocket || ws;
-    if (!wsToUse || !sessionIdParam) {
-      console.log('Cannot get question: ws=', !!wsToUse, 'sessionIdParam=', sessionIdParam);
-      return;
-    }
-
-    console.log('Getting next question for session:', sessionIdParam);
-    setLoading(true);
-    setLoadingText('Loading next question...');
-
-    wsToUse.send(JSON.stringify({
-      type: 'get_question',
-      session_id: sessionIdParam
-    }));
-
-    // Don't set loading to false here - wait for response
-  };
-
-  const playQuestion = async () => {
-    if (!ws || !currentQuestion) return;
+  const playLastAiResponse = async () => {
+    if (!ws || !currentAiResponse) return;
 
     setLoading(true);
     setLoadingText('Generating speech...');
 
     ws.send(JSON.stringify({
       type: 'text_to_speech',
-      text: currentQuestion.question_text
+      text: currentAiResponse
     }));
   };
 
@@ -328,10 +317,10 @@ function App() {
   };
 
   const processAudioRecording = async (audioBlob: Blob) => {
-    if (!ws || !sessionId || !currentQuestion) return;
+    if (!ws || !sessionId) return;
 
     setLoading(true);
-    setLoadingText('Processing your answer...');
+    setLoadingText('Processing your speech...');
 
     try {
       const arrayBuffer = await audioBlob.arrayBuffer();
@@ -349,9 +338,8 @@ function App() {
       const audioBase64 = btoa(binaryString);
 
       ws.send(JSON.stringify({
-        type: 'submit_audio',
+        type: 'process_audio',
         session_id: sessionId,
-        question_id: currentQuestion.question_id,
         audio_data: audioBase64
       }));
 
@@ -362,18 +350,51 @@ function App() {
     }
   };
 
-  const nextQuestion = () => {
-    // Check if time is up or if we should continue
-    if (currentQuestion && (currentQuestion.remaining_time_minutes <= 0 && currentQuestion.remaining_time_seconds <= 0)) {
+  const startTimer = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+    }
+    
+    timerRef.current = setInterval(() => {
+      setRemainingTime(prev => {
+        if (prev.minutes === 0 && prev.seconds === 0) {
+          finishInterview();
+          return prev;
+        }
+        
+        if (prev.seconds > 0) {
+          return { ...prev, seconds: prev.seconds - 1 };
+        } else if (prev.minutes > 0) {
+          return { minutes: prev.minutes - 1, seconds: 59 };
+        }
+        
+        return prev;
+      });
+    }, 1000);
+  };
+
+  const stopTimer = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const continueConversation = () => {
+    // Check if time is up
+    if (remainingTime.minutes <= 0 && remainingTime.seconds <= 0) {
       finishInterview();
     } else {
-      getNextQuestion();
+      // Clear transcript to prepare for next input
+      setTranscript('');
+      setCurrentAiResponse('');
     }
   };
 
   const finishInterview = () => {
     if (!ws || !sessionId) return;
 
+    stopTimer();
     setLoading(true);
     setLoadingText('Generating final report...');
 
@@ -384,10 +405,13 @@ function App() {
   };
 
   const resetToSetup = () => {
+    stopTimer();
     setCurrentSection(AppSection.SETUP);
     setSessionId(null);
-    setCurrentQuestion(null);
+    setConversationHistory([]);
     setTranscript('');
+    setCurrentAiResponse('');
+    setRemainingTime({ minutes: 0, seconds: 0 });
     setSessionSummary(null);
     setAllEvaluations([]);
     setSelectedTopics([]);
@@ -524,45 +548,82 @@ function App() {
           </div>
         )}
 
-        {/* Interview Section */}
-        {currentSection === AppSection.INTERVIEW && currentQuestion && (
+        {/* Conversational Interview Section */}
+        {currentSection === AppSection.INTERVIEW && (
           <div className="bg-white rounded-2xl shadow-2xl p-8 mb-8">
             <div className="mb-6">
               <h2 className="text-2xl font-bold text-gray-800 mb-4">
-                Question {currentQuestion.question_number} | Time Remaining: {currentQuestion.remaining_time_minutes}:{currentQuestion.remaining_time_seconds.toString().padStart(2, '0')}
+                🎤 AI Conversational Interview | Time Remaining: {remainingTime.minutes}:{remainingTime.seconds.toString().padStart(2, '0')}
               </h2>
               <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-primary to-secondary transition-all duration-500 ease-out"
-                  style={{ width: `${((currentQuestion.interview_duration * 60 - (currentQuestion.remaining_time_minutes * 60 + currentQuestion.remaining_time_seconds)) / (currentQuestion.interview_duration * 60)) * 100}%` }}
+                  style={{ width: `${((interviewDuration * 60 - (remainingTime.minutes * 60 + remainingTime.seconds)) / (interviewDuration * 60)) * 100}%` }}
                 ></div>
               </div>
             </div>
 
-            <div className="bg-gray-50 rounded-xl p-6 mb-6 border-l-4 border-primary">
-              <div className="text-lg leading-relaxed text-gray-800 mb-4">
-                {currentQuestion.question_text}
-              </div>
+            {/* Conversation History */}
+            <div className="bg-gray-50 rounded-xl p-6 mb-6 max-h-96 overflow-y-auto">
+              <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                💬 Conversation
+              </h3>
               
-              <div className="flex flex-wrap gap-3">
-                <span className="bg-primary text-white px-3 py-1 rounded-full text-sm font-semibold">
-                  {formatTopicName(currentQuestion.question_topic)}
-                </span>
-                <span className="bg-yellow-400 text-gray-800 px-3 py-1 rounded-full text-sm font-semibold">
-                  Difficulty: {currentQuestion.question_difficulty}/5
-                </span>
-              </div>
+              {conversationHistory.length === 0 ? (
+                <div className="text-center text-gray-500 py-8">
+                  <p className="text-lg mb-2">🤖 AI Interviewer is ready!</p>
+                  <p className="text-sm">Click "Push to Talk" to start the conversation</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {conversationHistory.map((exchange, index) => (
+                    <div key={index} className="space-y-2">
+                      {/* AI Response */}
+                      <div className="bg-blue-100 rounded-lg p-4 border-l-4 border-blue-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-blue-600 font-semibold">🤖 AI Interviewer:</span>
+                          <span className="text-xs text-gray-500">{new Date(exchange.timestamp).toLocaleTimeString()}</span>
+                        </div>
+                        <p className="text-gray-800">{exchange.ai_response}</p>
+                      </div>
+                      
+                      {/* User Response */}
+                      <div className="bg-green-100 rounded-lg p-4 border-l-4 border-green-500">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-green-600 font-semibold">👤 You:</span>
+                          <span className="text-xs text-gray-500">Intent: {exchange.intent}</span>
+                        </div>
+                        <p className="text-gray-800">{exchange.user_input}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {/* Audio Controls */}
+            {/* Current AI Response */}
+            {currentAiResponse && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6">
+                <h3 className="text-lg font-semibold text-blue-800 mb-3 flex items-center gap-2">
+                  🤖 AI Interviewer:
+                </h3>
+                <div className="text-blue-700 text-lg leading-relaxed">
+                  {currentAiResponse}
+                </div>
+              </div>
+            )}
+
+            {/* Voice Controls */}
             <div className="flex flex-wrap justify-center gap-4 mb-6">
-              <button
-                onClick={playQuestion}
-                disabled={loading}
-                className="bg-gray-600 hover:bg-gray-700 disabled:bg-gray-400 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300 flex items-center gap-2"
-              >
-                🔊 Play Question
-              </button>
+              {currentAiResponse && (
+                <button
+                  onClick={playLastAiResponse}
+                  disabled={loading}
+                  className="bg-gray-600 hover:bg-gray-700 disabled:bg-gray-400 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300 flex items-center gap-2"
+                >
+                  🔊 Replay AI Response
+                </button>
+              )}
               
               {!isRecording ? (
                 <button
@@ -570,7 +631,7 @@ function App() {
                   disabled={loading}
                   className="bg-red-500 hover:bg-red-600 disabled:bg-gray-400 text-white font-bold py-4 px-8 rounded-lg transition-all duration-300 transform hover:scale-105 flex items-center gap-2"
                 >
-                  🎤 Record Answer
+                  🎤 Push to Talk
                 </button>
               ) : (
                 <button
@@ -595,7 +656,7 @@ function App() {
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 mb-6">
                 <div className="flex items-center justify-center gap-3 mb-4">
                   <div className="w-3 h-3 rounded-full bg-red-500 animate-pulse"></div>
-                  <span className="font-semibold text-yellow-800">Recording... Speak clearly</span>
+                  <span className="font-semibold text-yellow-800">🎤 Listening... Speak naturally</span>
                 </div>
                 <div className="flex justify-center items-end gap-1 h-8">
                   {[...Array(5)].map((_, i) => (
@@ -609,55 +670,33 @@ function App() {
               </div>
             )}
 
-            {/* Transcription */}
+            {/* Current Transcription */}
             {transcript && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6">
-                <h3 className="text-lg font-semibold text-blue-800 mb-3 flex items-center gap-2">
-                  📝 Your Answer:
+              <div className="bg-green-50 border border-green-200 rounded-lg p-6 mb-6">
+                <h3 className="text-lg font-semibold text-green-800 mb-3 flex items-center gap-2">
+                  📝 You said:
                 </h3>
-                <div className="text-blue-700 italic text-lg leading-relaxed">
+                <div className="text-green-700 italic text-lg leading-relaxed">
                   {transcript}
                 </div>
               </div>
             )}
 
-            {/* Simple confirmation message after answer */}
-            {transcript && (
-              <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
-                <p className="text-green-800 font-semibold text-center">
-                  ✅ Answer recorded successfully!
+            {/* Processing confirmation */}
+            {transcript && loading && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                <p className="text-blue-800 font-semibold text-center">
+                  🤖 AI is thinking... Please wait for response
                 </p>
               </div>
             )}
 
-            {/* Navigation */}
-            {transcript && (
-              <div className="flex flex-wrap justify-center gap-4">
-                {currentQuestion.remaining_time_minutes > 0 || currentQuestion.remaining_time_seconds > 0 ? (
-                  <>
-                    <button
-                      onClick={nextQuestion}
-                      className="bg-primary hover:bg-primary/90 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300 transform hover:scale-105 flex items-center gap-2"
-                    >
-                      ➡️ Next Question
-                    </button>
-                    <button
-                      onClick={finishInterview}
-                      className="bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300 transform hover:scale-105 flex items-center gap-2"
-                    >
-                      🏁 Finish Early
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    onClick={finishInterview}
-                    className="bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300 transform hover:scale-105 flex items-center gap-2"
-                  >
-                    🏁 Finish Interview
-                  </button>
-                )}
-              </div>
-            )}
+            {/* Instructions */}
+            <div className="bg-gray-100 rounded-lg p-4 text-center">
+              <p className="text-gray-600 text-sm">
+                💡 <strong>Tip:</strong> This is a natural conversation! Ask questions, seek clarification, or answer as you would with a human interviewer.
+              </p>
+            </div>
           </div>
         )}
 

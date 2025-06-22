@@ -329,6 +329,67 @@ class LLMEvaluator:
                 recommendations.append(f"Address recurring issue: {weakness}")
         
         return recommendations
+    
+    async def generate_response(self, prompt: str, context: Dict[str, Any] = None) -> str:
+        """
+        Generate a response using the LLM for conversational AI
+        
+        Args:
+            prompt: The prompt to send to the LLM
+            context: Optional context information
+            
+        Returns:
+            Generated response text
+        """
+        try:
+            logger.info(f"Generating response for prompt: {prompt[:100]}...")
+            
+            # Create messages for the LLM
+            messages = [HumanMessage(content=prompt)]
+            
+            # Get LLM response
+            response = await self.llm.ainvoke(messages)
+            response_text = response.content.strip()
+            
+            logger.debug(f"Generated response: {response_text[:100]}...")
+            return response_text
+            
+        except Exception as e:
+            logger.error(f"Error generating response: {e}")
+            return "I apologize, but I'm having trouble generating a response right now. Could you please try again?"
+    
+    def generate_response_sync(self, prompt: str, context: Dict[str, Any] = None) -> str:
+        """
+        Synchronous version of generate_response
+        """
+        import asyncio
+        
+        try:
+            # Create new event loop if none exists
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            # Run the async generation
+            if loop.is_running():
+                # If loop is already running, create a new one
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(
+                        asyncio.run,
+                        self.generate_response(prompt, context)
+                    )
+                    return future.result()
+            else:
+                return loop.run_until_complete(
+                    self.generate_response(prompt, context)
+                )
+                
+        except Exception as e:
+            logger.error(f"Error in synchronous response generation: {e}")
+            return "I apologize, but I'm having trouble generating a response right now. Could you please try again?"
 
 # Example usage and testing
 if __name__ == "__main__":

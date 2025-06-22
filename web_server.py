@@ -17,6 +17,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 from question_manager import QuestionManager
 from llm_evaluator import LLMEvaluator
 from session_logger import SessionLogger
+from ai_conversation_manager import AIConversationManager
 from config import Config
 from deepgram import DeepgramClient, PrerecordedOptions, SpeakOptions
 import io
@@ -36,7 +37,14 @@ class WebSocketInterviewServer:
         self.deepgram_client = DeepgramClient(Config.DEEPGRAM_API_KEY)
         self.active_sessions: Dict[str, Dict[str, Any]] = {}
         
-        logger.info("WebSocket Interview Server initialized")
+        # Load question bank as context for AI
+        question_bank_context = self.question_manager.questions
+        self.ai_conversation_manager = AIConversationManager(
+            question_bank_context=[q.model_dump() for q in question_bank_context],
+            llm_evaluator=self.llm_evaluator
+        )
+        
+        logger.info("WebSocket Interview Server with Conversational AI initialized")
     
     async def handle_client(self, websocket):
         """Handle WebSocket client connections"""
@@ -81,7 +89,7 @@ class WebSocketInterviewServer:
             return await self.start_session(data, websocket)
         elif message_type == "get_question":
             return await self.get_question(data)
-        elif message_type == "submit_audio":
+        elif message_type == "submit_audio" or message_type == "process_audio":
             return await self.process_audio(data)
         elif message_type == "text_to_speech":
             return await self.text_to_speech(data)
@@ -109,6 +117,17 @@ class WebSocketInterviewServer:
             # Store session data
             session_id = session_logger.session.session_id
             import time
+            
+            # Create new conversation manager for this session
+            session_ai_manager = AIConversationManager(
+                question_bank_context=[q.model_dump() for q in self.question_manager.questions],
+                llm_evaluator=self.llm_evaluator
+            )
+            
+            # Initialize conversation state
+            session_ai_manager.conversation_state.duration_minutes = interview_duration
+            session_ai_manager.conversation_state.topics_covered = {topic: 0 for topic in topics}
+            
             self.active_sessions[session_id] = {
                 "logger": session_logger,
                 "topics": topics,
@@ -117,7 +136,8 @@ class WebSocketInterviewServer:
                 "start_time": time.time(),
                 "questions_asked": 0,
                 "websocket": websocket,
-                "evaluations": []  # Store evaluations for final report
+                "evaluations": [],  # Store evaluations for final report
+                "ai_manager": session_ai_manager  # Conversational AI manager
             }
             
             logger.info(f"Started session {session_id} with topics: {topics}, difficulty: {difficulty}, duration: {interview_duration}min")
@@ -207,10 +227,9 @@ class WebSocketInterviewServer:
             }
     
     async def process_audio(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Process audio data and return transcription and evaluation"""
+        """Process audio data using conversational AI system"""
         try:
             session_id = data.get("session_id")
-            question_id = data.get("question_id")
             audio_data = data.get("audio_data")  # Base64 encoded
             
             session = self.active_sessions.get(session_id)
@@ -232,58 +251,42 @@ class WebSocketInterviewServer:
                     "message": "Failed to transcribe audio"
                 }
             
-            # Log user response
-            session["logger"].log_user_response(question_id, transcript)
+            # Use conversational AI to process the speech
+            ai_manager = session["ai_manager"]
             
-            # Get question details for evaluation
-            question = self.question_manager.get_question_by_id(question_id)
-            if not question:
+            # Check if interview should end due to time
+            if ai_manager.should_end_interview():
                 return {
-                    "type": "error",
-                    "message": "Question not found"
+                    "type": "interview_complete",
+                    "message": "Interview time completed"
                 }
             
-            # Evaluate the answer
-            evaluation = self.llm_evaluator.evaluate_answer_sync(
-                question=question.text,
-                expected_answer=question.expected_answer,
-                user_answer=transcript,
-                topic=question.topic,
-                difficulty=question.difficulty
-            )
+            # Process user speech with conversational AI
+            ai_response = ai_manager.process_user_speech(transcript, session)
             
-            if evaluation:
-                # Log evaluation result and store for final report
-                session["logger"].log_evaluation_result(question_id, evaluation)
-                session["evaluations"].append({
-                    "question_id": question_id,
+            # Log the conversation exchange
+            session["logger"].log_user_response("conversation", transcript)
+            
+            # Convert AI response to speech
+            if ai_response.get('auto_play', True):
+                response_audio = await self.text_to_speech_direct(ai_response['text'])
+                
+                return {
+                    "type": "ai_conversation",
                     "transcript": transcript,
-                    "score": evaluation.score,
-                    "feedback": evaluation.feedback,
-                    "suggestions": evaluation.suggestions,
-                    "strengths": evaluation.strengths,
-                    "weaknesses": evaluation.weaknesses,
-                    "follow_up": evaluation.follow_up
-                })
+                    "response_text": ai_response['text'],
+                    "response_audio": response_audio,
+                    "response_type": ai_response['type'],
+                    "auto_play": True
+                }
             else:
-                # Store basic evaluation even if LLM evaluation failed
-                session["evaluations"].append({
-                    "question_id": question_id,
+                return {
+                    "type": "ai_conversation",
                     "transcript": transcript,
-                    "score": 0,
-                    "feedback": "Unable to evaluate answer",
-                    "suggestions": "Please try again",
-                    "strengths": [],
-                    "weaknesses": [],
-                    "follow_up": None
-                })
-            
-            # Return simple confirmation instead of full evaluation
-            return {
-                "type": "answer_recorded",
-                "transcript": transcript,
-                "message": "Answer recorded successfully"
-            }
+                    "response_text": ai_response['text'],
+                    "response_type": ai_response['type'],
+                    "auto_play": False
+                }
                 
         except Exception as e:
             logger.error(f"Error processing audio: {e}")
@@ -424,6 +427,48 @@ class WebSocketInterviewServer:
                 "message": f"Failed to generate speech: {str(e)}"
             }
     
+    async def text_to_speech_direct(self, text: str) -> str:
+        """Convert text to speech and return base64 audio data"""
+        try:
+            # Configure TTS options
+            options = SpeakOptions(
+                model="aura-asteria-en",
+                encoding="linear16",
+                sample_rate=16000
+            )
+            
+            # Generate speech using the new API
+            payload = {"text": text}
+            
+            # Use the new REST API
+            response = self.deepgram_client.speak.rest.v("1").stream_memory(
+                payload,
+                options
+            )
+            
+            if response and hasattr(response, 'content'):
+                audio_data = response.content
+            elif response and hasattr(response, 'stream'):
+                # Handle streaming response
+                audio_data = b""
+                for chunk in response.stream:
+                    audio_data += chunk
+            else:
+                logger.error("No audio data received from Deepgram")
+                return ""
+            
+            if not audio_data:
+                logger.error("Empty audio data generated")
+                return ""
+            
+            # Encode as base64 for transmission
+            audio_base64 = base64.b64encode(audio_data).decode('utf-8')
+            return audio_base64
+            
+        except Exception as e:
+            logger.error(f"Error in direct text-to-speech: {e}")
+            return ""
+    
     async def get_topics(self) -> Dict[str, Any]:
         """Get available topics"""
         try:
@@ -455,12 +500,31 @@ class WebSocketInterviewServer:
                     "message": "Session not found"
                 }
             
+            # Get conversation history from AI manager
+            ai_manager = session.get("ai_manager")
+            conversation_history = []
+            evaluations = []
+            
+            if ai_manager:
+                conversation_state = ai_manager.get_conversation_state()
+                conversation_history = conversation_state.conversation_history
+                
+                # Generate evaluations for each question-answer pair
+                for i, exchange in enumerate(conversation_history):
+                    if exchange.get('intent') == 'answering_question':
+                        # Create evaluation for this answer
+                        evaluation = {
+                            "question_number": i + 1,
+                            "question_text": "AI Generated Question",
+                            "transcript": exchange['user_input'],
+                            "ai_response": exchange['ai_response'],
+                            "timestamp": exchange['timestamp']
+                        }
+                        evaluations.append(evaluation)
+            
             # End the session and get summary
             session["logger"].end_session()
             summary = session["logger"].session.session_summary
-            
-            # Include all evaluations in the final report
-            evaluations = session.get("evaluations", [])
             
             # Clean up
             del self.active_sessions[session_id]
@@ -468,6 +532,7 @@ class WebSocketInterviewServer:
             return {
                 "type": "session_ended",
                 "summary": summary,
+                "conversation_history": conversation_history,
                 "evaluations": evaluations,
                 "total_questions": len(evaluations)
             }
