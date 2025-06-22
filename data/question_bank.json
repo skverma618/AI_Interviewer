@@ -1,0 +1,114 @@
+{
+  "questions": [
+    {
+      "id": "q001",
+      "text": "Explain the concept of object-oriented programming and its main principles",
+      "topic": "programming",
+      "difficulty": 3,
+      "expected_answer": "Object-oriented programming (OOP) is a programming paradigm based on the concept of objects, which contain data (attributes) and code (methods). The main principles are: 1) Encapsulation - bundling data and methods together, 2) Inheritance - creating new classes based on existing ones, 3) Polymorphism - objects of different types responding to the same interface, and 4) Abstraction - hiding complex implementation details.",
+      "follow_up_questions": [
+        "Can you give an example of inheritance in your preferred programming language?",
+        "What are the benefits of encapsulation in software design?"
+      ]
+    },
+    {
+      "id": "q002",
+      "text": "What is the difference between a stack and a queue data structure?",
+      "topic": "data_structures",
+      "difficulty": 2,
+      "expected_answer": "A stack is a Last-In-First-Out (LIFO) data structure where elements are added and removed from the same end (top). A queue is a First-In-First-Out (FIFO) data structure where elements are added at one end (rear) and removed from the other end (front). Stacks are used for function calls, undo operations, and expression evaluation. Queues are used for task scheduling, breadth-first search, and handling requests.",
+      "follow_up_questions": [
+        "Can you describe a real-world scenario where you would use a stack?",
+        "What are some common operations performed on queues?"
+      ]
+    },
+    {
+      "id": "q003",
+      "text": "Explain what Big O notation is and why it's important in algorithm analysis",
+      "topic": "algorithms",
+      "difficulty": 4,
+      "expected_answer": "Big O notation is a mathematical notation used to describe the upper bound of an algorithm's time or space complexity as the input size grows. It helps us understand how an algorithm's performance scales with larger inputs. For example, O(1) is constant time, O(n) is linear time, O(n²) is quadratic time. It's important because it allows us to compare algorithms objectively, predict performance at scale, and make informed decisions about which algorithm to use for different scenarios.",
+      "follow_up_questions": [
+        "What's the difference between O(log n) and O(n log n) complexity?",
+        "Can you give an example of an O(n²) algorithm?"
+      ]
+    },
+    {
+      "id": "q004",
+      "text": "What is a database index and how does it improve query performance?",
+      "topic": "databases",
+      "difficulty": 3,
+      "expected_answer": "A database index is a data structure that improves the speed of data retrieval operations on a database table. It works like a book's index, creating a separate structure that points to the location of data in the actual table. Indexes speed up SELECT queries by allowing the database to quickly locate rows without scanning the entire table. However, they also consume additional storage space and can slow down INSERT, UPDATE, and DELETE operations because the index must be maintained.",
+      "follow_up_questions": [
+        "What are the trade-offs of having too many indexes on a table?",
+        "When would you choose a clustered vs non-clustered index?"
+      ]
+    },
+    {
+      "id": "q005",
+      "text": "Describe the concept of recursion and provide a simple example",
+      "topic": "programming",
+      "difficulty": 2,
+      "expected_answer": "Recursion is a programming technique where a function calls itself to solve a problem by breaking it down into smaller, similar subproblems. A recursive function must have a base case (stopping condition) and a recursive case (where the function calls itself). A classic example is calculating factorial: factorial(n) = n * factorial(n-1), with base case factorial(0) = 1. Recursion is useful for problems with repetitive substructure like tree traversal, mathematical sequences, and divide-and-conquer algorithms.",
+      "follow_up_questions": [
+        "What happens if a recursive function doesn't have a proper base case?",
+        "Can you think of a problem where recursion might not be the best approach?"
+      ]
+    },
+    {
+      "id": "q006",
+      "text": "What is the difference between HTTP and HTTPS?",
+      "topic": "web_development",
+      "difficulty": 2,
+      "expected_answer": "HTTP (HyperText Transfer Protocol) is the foundation of data communication on the web, but it transmits data in plain text, making it vulnerable to interception. HTTPS (HTTP Secure) is HTTP with an added layer of security using SSL/TLS encryption. HTTPS encrypts data between the client and server, ensuring confidentiality, integrity, and authentication. Modern browsers mark HTTP sites as 'not secure' and HTTPS is now standard for all websites, especially those handling sensitive information.",
+      "follow_up_questions": [
+        "What role do SSL certificates play in HTTPS?",
+        "How does HTTPS impact website performance?"
+      ]
+    },
+    {
+      "id": "q007",
+      "text": "Explain the concept of version control and why it's important in software development",
+      "topic": "software_engineering",
+      "difficulty": 2,
+      "expected_answer": "Version control is a system that tracks changes to files over time, allowing you to recall specific versions, compare changes, and collaborate with others. It's crucial in software development because it enables multiple developers to work on the same project simultaneously, provides a complete history of changes, allows rollback to previous versions when bugs are introduced, and facilitates branching and merging for feature development. Git is the most popular version control system today.",
+      "follow_up_questions": [
+        "What's the difference between Git and GitHub?",
+        "Can you explain what a merge conflict is and how to resolve it?"
+      ]
+    },
+    {
+      "id": "q008",
+      "text": "What is machine learning and how is it different from traditional programming?",
+      "topic": "machine_learning",
+      "difficulty": 4,
+      "expected_answer": "Machine learning is a subset of artificial intelligence where computers learn to make predictions or decisions by finding patterns in data, rather than being explicitly programmed for every scenario. In traditional programming, we write specific instructions to solve problems. In machine learning, we provide data and desired outcomes, and the algorithm learns the patterns to make predictions on new, unseen data. ML is particularly useful for complex problems like image recognition, natural language processing, and recommendation systems where writing explicit rules would be impractical.",
+      "follow_up_questions": [
+        "What are the main types of machine learning?",
+        "Can you give an example of when you might choose machine learning over traditional programming?"
+      ]
+    },
+    {
+      "id": "q009",
+      "text": "Explain what an API is and why APIs are important in modern software development",
+      "topic": "software_engineering",
+      "difficulty": 3,
+      "expected_answer": "An API (Application Programming Interface) is a set of protocols, routines, and tools that allows different software applications to communicate with each other. It defines how software components should interact, specifying the requests that can be made, how to make them, data formats, and conventions. APIs are crucial because they enable modularity, allow integration between different systems, promote code reusability, and enable the creation of ecosystems where different services can work together seamlessly.",
+      "follow_up_questions": [
+        "What's the difference between REST and GraphQL APIs?",
+        "How do you ensure API security and authentication?"
+      ]
+    },
+    {
+      "id": "q010",
+      "text": "What is cloud computing and what are its main service models?",
+      "topic": "cloud_computing",
+      "difficulty": 3,
+      "expected_answer": "Cloud computing is the delivery of computing services (servers, storage, databases, networking, software) over the internet, allowing users to access resources on-demand without owning physical infrastructure. The main service models are: 1) IaaS (Infrastructure as a Service) - provides virtualized computing resources, 2) PaaS (Platform as a Service) - provides a platform for developing and deploying applications, and 3) SaaS (Software as a Service) - provides complete software applications over the internet. Benefits include scalability, cost-effectiveness, and reduced maintenance overhead.",
+      "follow_up_questions": [
+        "What are the advantages and disadvantages of cloud computing?",
+        "Can you explain the difference between public, private, and hybrid clouds?"
+      ]
+    }
+  ]
+}

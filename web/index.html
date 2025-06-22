@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Voice Interviewer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#667eea',
+                        secondary: '#764ba2',
+                    },
+                    animation: {
+                        'pulse-slow': 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'bounce-slow': 'bounce 2s infinite',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @keyframes visualizer {
+            0% { height: 10px; }
+            50% { height: 30px; }
+            100% { height: 10px; }
+        }
+        .audio-bar {
+            animation: visualizer 0.5s infinite alternate;
+        }
+        .audio-bar:nth-child(2) { animation-delay: 0.1s; }
+        .audio-bar:nth-child(3) { animation-delay: 0.2s; }
+        .audio-bar:nth-child(4) { animation-delay: 0.3s; }
+        .audio-bar:nth-child(5) { animation-delay: 0.4s; }
+    </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-primary to-secondary">
+    <div class="container mx-auto px-4 py-8 max-w-6xl">
+        <!-- Header -->
+        <header class="text-center text-white mb-8">
+            <h1 class="text-4xl md:text-5xl font-bold mb-4 drop-shadow-lg">
+                <i class="fas fa-microphone mr-3"></i>AI Voice Interviewer
+            </h1>
+            <p class="text-lg md:text-xl opacity-90">
+                Intelligent voice-based technical interviews with real-time AI evaluation
+            </p>
+        </header>
+
+        <!-- Connection Status -->
+        <div id="connectionStatus" class="bg-white/10 backdrop-blur-md rounded-full px-6 py-3 mb-8 flex items-center justify-center gap-3 text-white">
+            <i class="fas fa-circle text-xs" id="statusIcon"></i>
+            <span id="statusText">Connecting...</span>
+        </div>
+
+        <!-- Setup Section -->
+        <div id="setupSection" class="bg-white rounded-2xl shadow-2xl p-8 mb-8 transform hover:scale-[1.02] transition-transform duration-300">
+            <h2 class="text-2xl font-bold text-gray-800 mb-6 flex items-center gap-3">
+                <i class="fas fa-cog text-primary"></i>Interview Setup
+            </h2>
+            
+            <div class="space-y-6">
+                <div>
+                    <label class="block text-sm font-semibold text-gray-700 mb-3">Select Topics:</label>
+                    <div id="topicSelect" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                        <!-- Topics will be loaded dynamically -->
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-semibold text-gray-700 mb-3">
+                        Difficulty Level: <span id="difficultyValue" class="text-primary font-bold">3</span>
+                    </label>
+                    <input type="range" id="difficultySlider" min="1" max="5" value="3" 
+                           class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider">
+                </div>
+
+                <div>
+                    <label for="numQuestions" class="block text-sm font-semibold text-gray-700 mb-3">Number of Questions:</label>
+                    <select id="numQuestions" class="w-full p-3 border-2 border-gray-200 rounded-lg focus:border-primary focus:outline-none">
+                        <option value="3">3 Questions</option>
+                        <option value="5" selected>5 Questions</option>
+                        <option value="10">10 Questions</option>
+                    </select>
+                </div>
+
+                <button id="startInterview" class="w-full bg-primary hover:bg-primary/90 text-white font-bold py-4 px-6 rounded-lg transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-3">
+                    <i class="fas fa-play"></i>Start Interview
+                </button>
+            </div>
+        </div>
+
+        <!-- Interview Section -->
+        <div id="interviewSection" class="hidden">
+            <div class="bg-white rounded-2xl shadow-2xl p-8 mb-8">
+                <div class="mb-6">
+                    <h2 id="questionTitle" class="text-2xl font-bold text-gray-800 mb-4">Question 1 of 5</h2>
+                    <div class="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                        <div id="progressFill" class="h-full bg-gradient-to-r from-primary to-secondary transition-all duration-500 ease-out" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <div class="bg-gray-50 rounded-xl p-6 mb-6 border-l-4 border-primary">
+                    <div id="questionText" class="text-lg leading-relaxed text-gray-800 mb-4">
+                        Loading question...
+                    </div>
+                    
+                    <div class="flex flex-wrap gap-3">
+                        <span id="questionTopic" class="bg-primary text-white px-3 py-1 rounded-full text-sm font-semibold">Programming</span>
+                        <span id="questionDifficulty" class="bg-yellow-400 text-gray-800 px-3 py-1 rounded-full text-sm font-semibold">Difficulty: 3/5</span>
+                    </div>
+                </div>
+
+                <!-- Audio Controls -->
+                <div class="flex flex-wrap justify-center gap-4 mb-6">
+                    <button id="playQuestion" class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300 flex items-center gap-2">
+                        <i class="fas fa-volume-up"></i>Play Question
+                    </button>
+                    
+                    <button id="recordAnswer" class="bg-red-500 hover:bg-red-600 text-white font-bold py-4 px-8 rounded-lg transition-all duration-300 transform hover:scale-105 flex items-center gap-2">
+                        <i class="fas fa-microphone"></i>Record Answer
+                    </button>
+                    
+                    <button id="stopRecording" class="hidden bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300 flex items-center gap-2">
+                        <i class="fas fa-stop"></i>Stop Recording
+                    </button>
+                </div>
+
+                <!-- Recording Status -->
+                <div id="recordingStatus" class="hidden bg-yellow-50 border border-yellow-200 rounded-lg p-6 mb-6">
+                    <div class="flex items-center justify-center gap-3 mb-4">
+                        <i class="fas fa-circle text-red-500 animate-pulse"></i>
+                        <span class="font-semibold text-yellow-800">Recording... Speak clearly</span>
+                    </div>
+                    <div class="flex justify-center items-end gap-1 h-8">
+                        <div class="w-1 bg-red-500 rounded audio-bar" style="height: 10px;"></div>
+                        <div class="w-1 bg-red-500 rounded audio-bar" style="height: 15px;"></div>
+                        <div class="w-1 bg-red-500 rounded audio-bar" style="height: 20px;"></div>
+                        <div class="w-1 bg-red-500 rounded audio-bar" style="height: 15px;"></div>
+                        <div class="w-1 bg-red-500 rounded audio-bar" style="height: 10px;"></div>
+                    </div>
+                </div>
+
+                <!-- Transcription -->
+                <div id="transcriptionSection" class="hidden bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6">
+                    <h3 class="text-lg font-semibold text-blue-800 mb-3 flex items-center gap-2">
+                        <i class="fas fa-file-text"></i>Your Answer:
+                    </h3>
+                    <div id="transcriptionText" class="text-blue-700 italic text-lg leading-relaxed"></div>
+                </div>
+
+                <!-- Evaluation -->
+                <div id="evaluationSection" class="hidden mb-6">
+                    <h3 class="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
+                        <i class="fas fa-chart-line text-primary"></i>AI Evaluation
+                    </h3>
+                    
+                    <div class="text-center mb-6">
+                        <div class="inline-flex items-center justify-center w-32 h-32 rounded-full bg-gradient-to-br from-primary to-secondary text-white text-3xl font-bold shadow-lg">
+                            <span id="scoreValue">0</span>
+                            <span class="text-lg opacity-80">/10</span>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                        <div class="bg-gray-50 rounded-lg p-6 border-l-4 border-primary">
+                            <h4 class="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                                <i class="fas fa-comment text-primary"></i>Feedback
+                            </h4>
+                            <p id="feedbackText" class="text-gray-700 leading-relaxed"></p>
+                        </div>
+
+                        <div class="bg-gray-50 rounded-lg p-6 border-l-4 border-yellow-400">
+                            <h4 class="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                                <i class="fas fa-lightbulb text-yellow-500"></i>Suggestions
+                            </h4>
+                            <p id="suggestionsText" class="text-gray-700 leading-relaxed"></p>
+                        </div>
+
+                        <div class="bg-gray-50 rounded-lg p-6 border-l-4 border-green-400">
+                            <h4 class="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                                <i class="fas fa-thumbs-up text-green-500"></i>Strengths
+                            </h4>
+                            <ul id="strengthsList" class="text-gray-700 space-y-1"></ul>
+                        </div>
+
+                        <div class="bg-gray-50 rounded-lg p-6 border-l-4 border-red-400">
+                            <h4 class="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                                <i class="fas fa-exclamation-triangle text-red-500"></i>Areas to Improve
+                            </h4>
+                            <ul id="weaknessesList" class="text-gray-700 space-y-1"></ul>
+                        </div>
+                    </div>
+
+                    <div id="followUpSection" class="hidden bg-yellow-50 border border-yellow-200 rounded-lg p-6 mb-6">
+                        <h4 class="font-semibold text-yellow-800 mb-3 flex items-center gap-2">
+                            <i class="fas fa-question-circle"></i>Follow-up Question
+                        </h4>
+                        <p id="followUpText" class="text-yellow-700 mb-4"></p>
+                        <button id="answerFollowUp" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-lg transition-all duration-300 flex items-center gap-2">
+                            <i class="fas fa-microphone"></i>Answer Follow-up
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Navigation -->
+                <div class="flex flex-wrap justify-center gap-4">
+                    <button id="nextQuestion" class="hidden bg-primary hover:bg-primary/90 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300 transform hover:scale-105 flex items-center gap-2">
+                        <i class="fas fa-arrow-right"></i>Next Question
+                    </button>
+                    
+                    <button id="finishInterview" class="hidden bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300 transform hover:scale-105 flex items-center gap-2">
+                        <i class="fas fa-flag-checkered"></i>Finish Interview
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results Section -->
+        <div id="resultsSection" class="hidden bg-white rounded-2xl shadow-2xl p-8">
+            <h2 class="text-3xl font-bold text-gray-800 mb-8 text-center flex items-center justify-center gap-3">
+                <i class="fas fa-trophy text-yellow-500"></i>Interview Complete!
+            </h2>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+                <div class="bg-gradient-to-br from-primary to-secondary text-white rounded-xl p-6 text-center">
+                    <h3 class="text-xl font-semibold mb-4">Overall Performance</h3>
+                    <div class="text-5xl font-bold mb-2">
+                        <span id="overallScore">0</span>
+                        <span class="text-2xl opacity-80">/10</span>
+                    </div>
+                    <p id="performanceLevel" class="text-lg opacity-90">Good</p>
+                </div>
+
+                <div class="bg-gray-50 rounded-xl p-6">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4">Session Statistics</h3>
+                    <div class="grid grid-cols-3 gap-4 text-center">
+                        <div>
+                            <div id="totalQuestions" class="text-2xl font-bold text-primary">5</div>
+                            <div class="text-sm text-gray-600">Questions</div>
+                        </div>
+                        <div>
+                            <div id="sessionDuration" class="text-2xl font-bold text-primary">12.5</div>
+                            <div class="text-sm text-gray-600">Minutes</div>
+                        </div>
+                        <div>
+                            <div id="topicsCovered" class="text-2xl font-bold text-primary">3</div>
+                            <div class="text-sm text-gray-600">Topics</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex flex-wrap justify-center gap-4">
+                <button id="startNewInterview" class="bg-primary hover:bg-primary/90 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300 transform hover:scale-105 flex items-center gap-2">
+                    <i class="fas fa-redo"></i>Start New Interview
+                </button>
+                
+                <button id="downloadReport" class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300 flex items-center gap-2">
+                    <i class="fas fa-download"></i>Download Report
+                </button>
+            </div>
+        </div>
+
+        <!-- Error Messages -->
+        <div id="errorMessage" class="hidden fixed top-4 right-4 bg-red-500 text-white p-4 rounded-lg shadow-lg z-50 max-w-md">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <i class="fas fa-exclamation-circle"></i>
+                    <span id="errorText"></span>
+                </div>
+                <button id="closeError" class="text-white hover:text-gray-200 text-xl">&times;</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl p-8 text-center">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+            <p id="loadingText" class="text-gray-700 font-semibold">Processing...</p>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

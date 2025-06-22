@@ -1,0 +1,12 @@
+# Core dependencies
+deepgram-sdk>=3.2.0
+langchain>=0.1.0
+langchain-openai>=0.0.5
+openai>=1.0.0
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+
+# Audio processing
+pyaudio>=0.2.11
+
+# Note: asyncio, json, logging, typing, uuid, datetime, and wave are built-in Python modules
