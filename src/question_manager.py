@@ -58,6 +58,9 @@ class QuestionManager:
     def get_available_topics(self) -> List[str]:
         """Get list of all available topics"""
         topics = list(set(question.topic for question in self.questions))
+        
+        # console topics for debugging
+        print(f"Available topics: {topics}")
         return sorted(topics)
     
     def get_difficulty_range(self) -> tuple:

@@ -100,31 +100,34 @@ class WebSocketInterviewServer:
         try:
             topics = data.get("topics", [])
             difficulty = data.get("difficulty", 3)
-            num_questions = data.get("num_questions", 5)
+            interview_duration = data.get("interview_duration", 30)  # Default 30 minutes
             
             # Create session logger
             session_logger = SessionLogger()
-            session_logger.set_user_preferences(topics, difficulty, num_questions=num_questions)
+            session_logger.set_user_preferences(topics, difficulty, interview_duration=interview_duration)
             
             # Store session data
             session_id = session_logger.session.session_id
+            import time
             self.active_sessions[session_id] = {
                 "logger": session_logger,
                 "topics": topics,
                 "difficulty": difficulty,
-                "num_questions": num_questions,
+                "interview_duration": interview_duration,
+                "start_time": time.time(),
                 "questions_asked": 0,
-                "websocket": websocket
+                "websocket": websocket,
+                "evaluations": []  # Store evaluations for final report
             }
             
-            logger.info(f"Started session {session_id} with topics: {topics}, difficulty: {difficulty}")
+            logger.info(f"Started session {session_id} with topics: {topics}, difficulty: {difficulty}, duration: {interview_duration}min")
             
             return {
                 "type": "session_started",
                 "session_id": session_id,
                 "topics": topics,
                 "difficulty": difficulty,
-                "num_questions": num_questions
+                "interview_duration": interview_duration
             }
             
         except Exception as e:
@@ -146,11 +149,15 @@ class WebSocketInterviewServer:
                     "message": "Session not found"
                 }
             
-            # Check if we've reached the question limit
-            if session["questions_asked"] >= session["num_questions"]:
+            # Check if interview time has elapsed
+            import time
+            elapsed_time = time.time() - session["start_time"]
+            interview_duration_seconds = session["interview_duration"] * 60
+            
+            if elapsed_time >= interview_duration_seconds:
                 return {
                     "type": "interview_complete",
-                    "message": "Interview completed"
+                    "message": "Interview time completed"
                 }
             
             # Select a question
@@ -175,6 +182,11 @@ class WebSocketInterviewServer:
             
             session["questions_asked"] += 1
             
+            # Calculate remaining time
+            remaining_time = interview_duration_seconds - elapsed_time
+            remaining_minutes = int(remaining_time // 60)
+            remaining_seconds = int(remaining_time % 60)
+            
             return {
                 "type": "question",
                 "question_id": question.id,
@@ -182,7 +194,9 @@ class WebSocketInterviewServer:
                 "question_topic": question.topic,
                 "question_difficulty": question.difficulty,
                 "question_number": session["questions_asked"],
-                "total_questions": session["num_questions"]
+                "remaining_time_minutes": remaining_minutes,
+                "remaining_time_seconds": remaining_seconds,
+                "interview_duration": session["interview_duration"]
             }
             
         except Exception as e:
@@ -239,11 +253,10 @@ class WebSocketInterviewServer:
             )
             
             if evaluation:
-                # Log evaluation result
+                # Log evaluation result and store for final report
                 session["logger"].log_evaluation_result(question_id, evaluation)
-                
-                return {
-                    "type": "evaluation",
+                session["evaluations"].append({
+                    "question_id": question_id,
                     "transcript": transcript,
                     "score": evaluation.score,
                     "feedback": evaluation.feedback,
@@ -251,10 +264,11 @@ class WebSocketInterviewServer:
                     "strengths": evaluation.strengths,
                     "weaknesses": evaluation.weaknesses,
                     "follow_up": evaluation.follow_up
-                }
+                })
             else:
-                return {
-                    "type": "evaluation",
+                # Store basic evaluation even if LLM evaluation failed
+                session["evaluations"].append({
+                    "question_id": question_id,
                     "transcript": transcript,
                     "score": 0,
                     "feedback": "Unable to evaluate answer",
@@ -262,7 +276,14 @@ class WebSocketInterviewServer:
                     "strengths": [],
                     "weaknesses": [],
                     "follow_up": None
-                }
+                })
+            
+            # Return simple confirmation instead of full evaluation
+            return {
+                "type": "answer_recorded",
+                "transcript": transcript,
+                "message": "Answer recorded successfully"
+            }
                 
         except Exception as e:
             logger.error(f"Error processing audio: {e}")
@@ -438,12 +459,17 @@ class WebSocketInterviewServer:
             session["logger"].end_session()
             summary = session["logger"].session.session_summary
             
+            # Include all evaluations in the final report
+            evaluations = session.get("evaluations", [])
+            
             # Clean up
             del self.active_sessions[session_id]
             
             return {
                 "type": "session_ended",
-                "summary": summary
+                "summary": summary,
+                "evaluations": evaluations,
+                "total_questions": len(evaluations)
             }
             
         except Exception as e:

@@ -110,39 +110,51 @@ class AIVoiceInterviewer:
             except ValueError:
                 print("❌ Please enter a valid number")
         
-        # Get number of questions
+        # Get interview duration
         while True:
             try:
-                num_questions_input = input("\nHow many questions would you like? (default: 5): ").strip()
-                if not num_questions_input:
-                    num_questions = 5
+                duration_input = input(f"\nInterview duration in minutes (default: {Config.DEFAULT_INTERVIEW_DURATION}): ").strip()
+                if not duration_input:
+                    interview_duration = Config.DEFAULT_INTERVIEW_DURATION
                     break
                 
-                num_questions = int(num_questions_input)
-                if 1 <= num_questions <= 20:
+                interview_duration = int(duration_input)
+                if Config.MIN_INTERVIEW_DURATION <= interview_duration <= Config.MAX_INTERVIEW_DURATION:
                     break
                 else:
-                    print("❌ Please enter a number between 1 and 20")
+                    print(f"❌ Please enter a duration between {Config.MIN_INTERVIEW_DURATION} and {Config.MAX_INTERVIEW_DURATION} minutes")
             except ValueError:
                 print("❌ Please enter a valid number")
         
-        return selected_topics, selected_difficulty, num_questions
+        return selected_topics, selected_difficulty, interview_duration
     
-    async def conduct_interview(self, topics: List[str], difficulty: int, num_questions: int):
+    async def conduct_interview(self, topics: List[str], difficulty: int, interview_duration: int):
         """Conduct the main interview session"""
-        print(f"\n🎯 Starting interview with {num_questions} questions...")
+        print(f"\n🎯 Starting {interview_duration}-minute interview...")
         print("Topics:", ", ".join(topics))
         print(f"Difficulty: {difficulty}/5")
         
         # Set user preferences in session logger
-        self.session_logger.set_user_preferences(topics, difficulty, num_questions=num_questions)
+        self.session_logger.set_user_preferences(topics, difficulty, interview_duration=interview_duration)
         
         questions_asked = 0
+        interview_start_time = time.time()
+        interview_duration_seconds = interview_duration * 60
         
         try:
-            while questions_asked < num_questions:
+            while True:
+                # Check if interview time has elapsed
+                elapsed_time = time.time() - interview_start_time
+                if elapsed_time >= interview_duration_seconds:
+                    print(f"\n⏰ Interview time ({interview_duration} minutes) has elapsed!")
+                    break
+                
+                remaining_time = interview_duration_seconds - elapsed_time
+                remaining_minutes = int(remaining_time // 60)
+                remaining_seconds = int(remaining_time % 60)
+                
                 print(f"\n{'='*60}")
-                print(f"QUESTION {questions_asked + 1} of {num_questions}")
+                print(f"QUESTION {questions_asked + 1} | Time Remaining: {remaining_minutes}:{remaining_seconds:02d}")
                 print('='*60)
                 
                 # Select a question
@@ -193,8 +205,8 @@ class AIVoiceInterviewer:
                     question.id, user_answer, response_duration=response_duration
                 )
                 
-                # Evaluate the answer
-                print("🤔 Evaluating your answer...")
+                # Store evaluation for later processing (don't display now)
+                print("📝 Answer recorded. Moving to next question...")
                 evaluation_result = self.llm_evaluator.evaluate_answer_sync(
                     question=question.text,
                     expected_answer=question.expected_answer,
@@ -204,23 +216,22 @@ class AIVoiceInterviewer:
                 )
                 
                 if evaluation_result:
-                    # Log evaluation result
+                    # Log evaluation result (but don't display)
                     self.session_logger.log_evaluation_result(question.id, evaluation_result)
-                    
-                    # Handle follow-up question if generated
-                    if evaluation_result.follow_up:
-                        await self._handle_follow_up_question(
-                            question.id, evaluation_result.follow_up
-                        )
                 else:
                     print("⚠️ Failed to evaluate answer, but continuing...")
                 
                 questions_asked += 1
                 
+                # Check time again before preparing next question
+                elapsed_time = time.time() - interview_start_time
+                if elapsed_time >= interview_duration_seconds:
+                    print(f"\n⏰ Interview time has elapsed after {questions_asked} questions!")
+                    break
+                
                 # Brief pause between questions
-                if questions_asked < num_questions:
-                    print("\n⏳ Preparing next question...")
-                    time.sleep(2)
+                print("\n⏳ Preparing next question...")
+                time.sleep(2)
         
         except KeyboardInterrupt:
             print("\n\n⏹️ Interview interrupted by user.")
@@ -229,8 +240,10 @@ class AIVoiceInterviewer:
             logger.error(f"Interview error: {e}")
         
         finally:
-            # End the session
-            print(f"\n🏁 Interview completed! Asked {questions_asked} questions.")
+            # End the session and generate final report
+            elapsed_minutes = (time.time() - interview_start_time) / 60
+            print(f"\n🏁 Interview completed! Asked {questions_asked} questions in {elapsed_minutes:.1f} minutes.")
+            print("🔄 Generating comprehensive interview report...")
             self.session_logger.end_session()
     
     async def _handle_follow_up_question(self, original_question_id: str, follow_up_question: str):
@@ -288,8 +301,8 @@ class AIVoiceInterviewer:
             
             if choice == "1":
                 # Start interview
-                topics, difficulty, num_questions = self.get_user_preferences()
-                await self.conduct_interview(topics, difficulty, num_questions)
+                topics, difficulty, interview_duration = self.get_user_preferences()
+                await self.conduct_interview(topics, difficulty, interview_duration)
                 
                 # Ask if user wants to continue
                 continue_choice = input("\nWould you like to start another interview? (y/n): ").strip().lower()

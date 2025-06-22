@@ -97,12 +97,19 @@ class SessionLogger:
             **kwargs
         }
         
-        self.session_logger.info(f"User preferences set: topics={topics}, difficulty={difficulty}")
-        self.log_to_console("📋 Session Configuration", {
+        interview_duration = kwargs.get('interview_duration', 'Not specified')
+        self.session_logger.info(f"User preferences set: topics={topics}, difficulty={difficulty}, duration={interview_duration}")
+        
+        config_data = {
             "Topics": ", ".join(topics),
             "Difficulty Level": f"{difficulty}/5",
             "Session ID": self.session.session_id
-        })
+        }
+        
+        if interview_duration != 'Not specified':
+            config_data["Interview Duration"] = f"{interview_duration} minutes"
+        
+        self.log_to_console("📋 Session Configuration", config_data)
     
     def log_question_asked(self, question_id: str, question_text: str, 
                           question_topic: str, question_difficulty: int):

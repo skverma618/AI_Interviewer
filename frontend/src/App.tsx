@@ -8,7 +8,9 @@ interface Question {
   question_topic: string;
   question_difficulty: number;
   question_number: number;
-  total_questions: number;
+  remaining_time_minutes: number;
+  remaining_time_seconds: number;
+  interview_duration: number;
 }
 
 interface EvaluationResult {
@@ -64,17 +66,16 @@ function App() {
   const [availableTopics, setAvailableTopics] = useState<string[]>([]);
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
   const [difficulty, setDifficulty] = useState(3);
-  const [numQuestions, setNumQuestions] = useState(5);
+  const [interviewDuration, setInterviewDuration] = useState(30);
 
   // Interview state
   const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState<string>('');
-  const [evaluation, setEvaluation] = useState<EvaluationResult | null>(null);
-  const [showEvaluation, setShowEvaluation] = useState(false);
 
   // Results state
   const [sessionSummary, setSessionSummary] = useState<SessionSummary | null>(null);
+  const [allEvaluations, setAllEvaluations] = useState<EvaluationResult[]>([]);
 
   // Audio recording
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -148,17 +149,14 @@ function App() {
       case 'question':
         console.log('Received question:', data);
         setCurrentQuestion(data);
-        setShowEvaluation(false);
         setTranscript('');
-        setEvaluation(null);
         setLoading(false);
         break;
 
-      case 'evaluation':
+      case 'answer_recorded':
         setTranscript(data.transcript);
-        setEvaluation(data);
-        setShowEvaluation(true);
         setLoading(false);
+        // Don't show evaluation during interview
         break;
 
       case 'interview_complete':
@@ -167,6 +165,7 @@ function App() {
 
       case 'session_ended':
         setSessionSummary(data.summary);
+        setAllEvaluations(data.evaluations || []);
         setCurrentSection(AppSection.RESULTS);
         setLoading(false);
         break;
@@ -197,7 +196,7 @@ function App() {
       return;
     }
 
-    console.log('Starting interview with:', { topics: selectedTopics, difficulty, numQuestions });
+    console.log('Starting interview with:', { topics: selectedTopics, difficulty, interviewDuration });
     setLoading(true);
     setLoadingText('Starting interview...');
 
@@ -205,7 +204,7 @@ function App() {
       type: 'start_session',
       topics: selectedTopics,
       difficulty: difficulty,
-      num_questions: numQuestions
+      interview_duration: interviewDuration
     };
     
     console.log('Sending message:', message);
@@ -336,7 +335,18 @@ function App() {
 
     try {
       const arrayBuffer = await audioBlob.arrayBuffer();
-      const audioBase64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+      const uint8Array = new Uint8Array(arrayBuffer);
+      
+      // Convert to base64 more efficiently to avoid stack overflow
+      let binaryString = '';
+      const chunkSize = 8192; // Process in chunks to avoid stack overflow
+      
+      for (let i = 0; i < uint8Array.length; i += chunkSize) {
+        const chunk = uint8Array.slice(i, i + chunkSize);
+        binaryString += String.fromCharCode.apply(null, Array.from(chunk));
+      }
+      
+      const audioBase64 = btoa(binaryString);
 
       ws.send(JSON.stringify({
         type: 'submit_audio',
@@ -353,7 +363,8 @@ function App() {
   };
 
   const nextQuestion = () => {
-    if (currentQuestion && currentQuestion.question_number >= currentQuestion.total_questions) {
+    // Check if time is up or if we should continue
+    if (currentQuestion && (currentQuestion.remaining_time_minutes <= 0 && currentQuestion.remaining_time_seconds <= 0)) {
       finishInterview();
     } else {
       getNextQuestion();
@@ -377,9 +388,8 @@ function App() {
     setSessionId(null);
     setCurrentQuestion(null);
     setTranscript('');
-    setEvaluation(null);
-    setShowEvaluation(false);
     setSessionSummary(null);
+    setAllEvaluations([]);
     setSelectedTopics([]);
   };
 
@@ -489,16 +499,17 @@ function App() {
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-3">
-                  Number of Questions:
+                  Interview Duration:
                 </label>
                 <select
-                  value={numQuestions}
-                  onChange={(e) => setNumQuestions(parseInt(e.target.value))}
+                  value={interviewDuration}
+                  onChange={(e) => setInterviewDuration(parseInt(e.target.value))}
                   className="w-full p-3 border-2 border-gray-200 rounded-lg focus:border-primary focus:outline-none"
                 >
-                  <option value={3}>3 Questions</option>
-                  <option value={5}>5 Questions</option>
-                  <option value={10}>10 Questions</option>
+                  <option value={15}>15 Minutes</option>
+                  <option value={30}>30 Minutes</option>
+                  <option value={45}>45 Minutes</option>
+                  <option value={60}>60 Minutes</option>
                 </select>
               </div>
 
@@ -518,12 +529,12 @@ function App() {
           <div className="bg-white rounded-2xl shadow-2xl p-8 mb-8">
             <div className="mb-6">
               <h2 className="text-2xl font-bold text-gray-800 mb-4">
-                Question {currentQuestion.question_number} of {currentQuestion.total_questions}
+                Question {currentQuestion.question_number} | Time Remaining: {currentQuestion.remaining_time_minutes}:{currentQuestion.remaining_time_seconds.toString().padStart(2, '0')}
               </h2>
               <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
-                <div 
+                <div
                   className="h-full bg-gradient-to-r from-primary to-secondary transition-all duration-500 ease-out"
-                  style={{ width: `${(currentQuestion.question_number / currentQuestion.total_questions) * 100}%` }}
+                  style={{ width: `${((currentQuestion.interview_duration * 60 - (currentQuestion.remaining_time_minutes * 60 + currentQuestion.remaining_time_seconds)) / (currentQuestion.interview_duration * 60)) * 100}%` }}
                 ></div>
               </div>
             </div>
@@ -569,6 +580,14 @@ function App() {
                   ⏹️ Stop Recording
                 </button>
               )}
+              
+              <button
+                onClick={finishInterview}
+                disabled={loading}
+                className="bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300 flex items-center gap-2"
+              >
+                🏁 Finish Interview
+              </button>
             </div>
 
             {/* Recording Status */}
@@ -602,88 +621,33 @@ function App() {
               </div>
             )}
 
-            {/* Evaluation */}
-            {showEvaluation && evaluation && (
-              <div className="mb-6">
-                <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
-                  📊 AI Evaluation
-                </h3>
-                
-                <div className="text-center mb-6">
-                  <div className="inline-flex items-center justify-center w-32 h-32 rounded-full bg-gradient-to-br from-primary to-secondary text-white text-3xl font-bold shadow-lg">
-                    <span>{evaluation.score}</span>
-                    <span className="text-lg opacity-80">/10</span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                  <div className="bg-gray-50 rounded-lg p-6 border-l-4 border-primary">
-                    <h4 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                      💬 Feedback
-                    </h4>
-                    <p className="text-gray-700 leading-relaxed">{evaluation.feedback}</p>
-                  </div>
-
-                  <div className="bg-gray-50 rounded-lg p-6 border-l-4 border-yellow-400">
-                    <h4 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                      💡 Suggestions
-                    </h4>
-                    <p className="text-gray-700 leading-relaxed">{evaluation.suggestions}</p>
-                  </div>
-
-                  <div className="bg-gray-50 rounded-lg p-6 border-l-4 border-green-400">
-                    <h4 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                      👍 Strengths
-                    </h4>
-                    <ul className="text-gray-700 space-y-1">
-                      {evaluation.strengths.map((strength, index) => (
-                        <li key={index} className="flex items-start gap-2">
-                          <span className="text-green-500">•</span>
-                          {strength}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <div className="bg-gray-50 rounded-lg p-6 border-l-4 border-red-400">
-                    <h4 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                      ⚠️ Areas to Improve
-                    </h4>
-                    <ul className="text-gray-700 space-y-1">
-                      {evaluation.weaknesses.map((weakness, index) => (
-                        <li key={index} className="flex items-start gap-2">
-                          <span className="text-red-500">•</span>
-                          {weakness}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-
-                {evaluation.follow_up && (
-                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 mb-6">
-                    <h4 className="font-semibold text-yellow-800 mb-3 flex items-center gap-2">
-                      ❓ Follow-up Question
-                    </h4>
-                    <p className="text-yellow-700 mb-4">{evaluation.follow_up}</p>
-                    <button className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-lg transition-all duration-300 flex items-center gap-2">
-                      🎤 Answer Follow-up
-                    </button>
-                  </div>
-                )}
+            {/* Simple confirmation message after answer */}
+            {transcript && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+                <p className="text-green-800 font-semibold text-center">
+                  ✅ Answer recorded successfully!
+                </p>
               </div>
             )}
 
             {/* Navigation */}
-            {showEvaluation && (
+            {transcript && (
               <div className="flex flex-wrap justify-center gap-4">
-                {currentQuestion.question_number < currentQuestion.total_questions ? (
-                  <button
-                    onClick={nextQuestion}
-                    className="bg-primary hover:bg-primary/90 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300 transform hover:scale-105 flex items-center gap-2"
-                  >
-                    ➡️ Next Question
-                  </button>
+                {currentQuestion.remaining_time_minutes > 0 || currentQuestion.remaining_time_seconds > 0 ? (
+                  <>
+                    <button
+                      onClick={nextQuestion}
+                      className="bg-primary hover:bg-primary/90 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300 transform hover:scale-105 flex items-center gap-2"
+                    >
+                      ➡️ Next Question
+                    </button>
+                    <button
+                      onClick={finishInterview}
+                      className="bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300 transform hover:scale-105 flex items-center gap-2"
+                    >
+                      🏁 Finish Early
+                    </button>
+                  </>
                 ) : (
                   <button
                     onClick={finishInterview}
@@ -750,13 +714,92 @@ function App() {
                 </ul>
               </div>
             </div>
+
+            {/* Detailed Evaluations Section */}
+            {allEvaluations.length > 0 && (
+              <div className="mb-8">
+                <h3 className="text-2xl font-bold text-gray-800 mb-6 text-center">
+                  📊 Detailed Question Analysis
+                </h3>
+                <div className="space-y-6">
+                  {allEvaluations.map((evaluation, index) => (
+                    <div key={index} className="bg-gray-50 rounded-xl p-6 border border-gray-200">
+                      <div className="flex items-center justify-between mb-4">
+                        <h4 className="text-lg font-semibold text-gray-800">
+                          Question {index + 1}
+                        </h4>
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl font-bold text-primary">{evaluation.score}</span>
+                          <span className="text-gray-600">/10</span>
+                        </div>
+                      </div>
+                      
+                      <div className="mb-4">
+                        <h5 className="font-semibold text-gray-700 mb-2">Your Answer:</h5>
+                        <p className="text-gray-600 italic bg-white p-3 rounded-lg border">
+                          {evaluation.transcript}
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <h5 className="font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                            💬 Feedback
+                          </h5>
+                          <p className="text-gray-600 text-sm">{evaluation.feedback}</p>
+                        </div>
+                        
+                        <div>
+                          <h5 className="font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                            💡 Suggestions
+                          </h5>
+                          <p className="text-gray-600 text-sm">{evaluation.suggestions}</p>
+                        </div>
+                        
+                        {evaluation.strengths.length > 0 && (
+                          <div>
+                            <h5 className="font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                              👍 Strengths
+                            </h5>
+                            <ul className="text-gray-600 text-sm space-y-1">
+                              {evaluation.strengths.map((strength, idx) => (
+                                <li key={idx} className="flex items-start gap-2">
+                                  <span className="text-green-500">•</span>
+                                  {strength}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        
+                        {evaluation.weaknesses.length > 0 && (
+                          <div>
+                            <h5 className="font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                              ⚠️ Areas to Improve
+                            </h5>
+                            <ul className="text-gray-600 text-sm space-y-1">
+                              {evaluation.weaknesses.map((weakness, idx) => (
+                                <li key={idx} className="flex items-start gap-2">
+                                  <span className="text-red-500">•</span>
+                                  {weakness}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="text-center">
               <button
                 onClick={resetToSetup}
                 className="bg-primary hover:bg-primary/90 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300 transform hover:scale-105"
               >
-                🔄
-                Start New Interview
+                🔄 Start New Interview
               </button>
             </div>
           </div>

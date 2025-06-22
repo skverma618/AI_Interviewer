@@ -30,6 +30,11 @@ class Config:
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     
+    # Interview Settings
+    DEFAULT_INTERVIEW_DURATION: int = int(os.getenv("DEFAULT_INTERVIEW_DURATION", "30"))  # minutes
+    MIN_INTERVIEW_DURATION: int = 15  # minimum 15 minutes
+    MAX_INTERVIEW_DURATION: int = 120  # maximum 2 hours
+    
     # File Paths
     QUESTION_BANK_PATH: str = "data/question_bank.json"
     LOGS_DIR: str = "logs"
